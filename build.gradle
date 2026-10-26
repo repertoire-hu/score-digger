@@ -1,0 +1,138 @@
+plugins {
+    id 'org.ajoberstar.grgit' version '5.3.3'
+    id 'io.github.gradle-nexus.publish-plugin' version '2.0.0'
+    id 'nebula.lint' version '21.2.0'
+    id 'com.github.ben-manes.versions' version '0.54.0'
+}
+
+description = 'ScoreDigger Music Score Search'
+
+def groupName = 'hu.repertoire.scoredigger'
+
+def scmUrl = 'https://github.com/repertoire-hu/score-digger.git'
+def websiteUrl = scmUrl.replaceAll(/\.git$/, "");
+
+def automaticVersion = '0.1.0-SNAPSHOT'
+def versionMatcher = grgit.describe() =~ /^v?(\d+\.\d+\.)(\d+)(.*)$/
+if (versionMatcher.size() > 0) {
+    def versionMatch = versionMatcher[0]
+    def isVersionDirty = !versionMatch[3].isEmpty()
+    def versionPrefix = versionMatch[1]
+    def versionPatch = isVersionDirty ? (Integer.parseInt(versionMatch[2]) + 1) + "" : versionMatch[2];
+    def versionSuffix = isVersionDirty ? "-SNAPSHOT" : ""
+    automaticVersion = versionPrefix + versionPatch + versionSuffix
+}
+
+defaultTasks 'build'
+
+nexusPublishing {
+    repositories {
+        sonatype {
+            nexusUrl.set(uri(providers.gradleProperty('sonatypeUrl').orNull))
+        }
+    }
+}
+
+tasks.register('printVersion') {
+    inputs.property('projectVersion', project.version)
+    doLast {
+        println inputs.properties['projectVersion']
+    }
+}
+
+allprojects {
+    group = groupName
+    version = automaticVersion
+
+    repositories {
+        mavenCentral()
+        maven {
+            url = 'https://repo.osgeo.org/repository/release'
+        }
+        maven {
+            url = 'https://maven.repository.redhat.com/ga/'
+        }
+        mavenLocal()
+    }
+}
+
+subprojects { subproject ->
+    subproject.plugins.withId('java') {
+
+        subproject.plugins.apply('maven-publish')
+        subproject.plugins.apply('signing')
+
+        subproject.java {
+            withJavadocJar()
+            withSourcesJar()
+        }
+
+        subproject.tasks.withType(JavaCompile).configureEach {
+            options.encoding = 'UTF-8'
+            options.compilerArgs += ['-Xlint:-options']
+        }
+
+        subproject.tasks.withType(Javadoc).configureEach { javadocTask ->
+            javadocTask.options.addStringOption('Xdoclint:none', '-quiet')
+        }
+
+        def moduleName = groupName + '.' + subproject.name.replaceAll(/\W/, ".")
+        subproject.tasks.named('jar', Jar).configure {
+            manifest.attributes('Automatic-Module-Name': moduleName)
+        }
+
+        subproject.tasks.withType(Test).configureEach { testTask ->
+            testTask.useJUnitPlatform()
+            testTask.testLogging {
+                events('failed')
+                showExceptions = true
+                exceptionFormat = 'full'
+                showCauses = true
+                showStackTraces = true
+                showStandardStreams = false
+            }
+        }
+
+        subproject.publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from subproject.components.java
+                    suppressAllPomMetadataWarnings()
+                }
+            }
+        }
+
+        subproject.publishing.publications.withType(MavenPublication).configureEach { mavenPublication ->
+            mavenPublication.pom {
+                name = subproject.name
+                description = subproject.provider { subproject.description }
+                url = websiteUrl
+                licenses {
+                    license {
+                        name = 'The Apache Software License, Version 2.0'
+                        url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                        distribution = 'repo'
+                    }
+                }
+                scm {
+                    connection = 'scm:git:' + scmUrl
+                    developerConnection = 'scm:git:' + scmUrl
+                    url = scmUrl
+                }
+                developers {
+                    developer {
+                        id = 'davidsusu'
+                        name = 'Dávid Horváth'
+                        email = 'horvath@webarticum.hu'
+                    }
+                }
+            }
+        }
+
+        subproject.signing {
+            required = true
+            sign subproject.publishing.publications
+        }
+
+    }
+}

@@ -1,0 +1,12 @@
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+rootProject.name = 'score-digger'
+
+include 'core'
+include 'search'
+
+rootProject.children.each { project ->
+    project.projectDir = new File(settingsDir, "projects/${project.name}")
+}
